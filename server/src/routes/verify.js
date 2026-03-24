@@ -4,7 +4,7 @@ import supabase from '../supabase.js';
 import { EXTRA_FIELDS, pickRandomFields } from '../fieldConfig.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET || '';
 const TOKEN_EXPIRY = '30m'; // session token valid for 30 minutes
 
 // ── Step 1: look up employee, return 3 random fields + signed token ───────────
@@ -15,9 +15,20 @@ router.post('/init', async (req, res) => {
     return res.status(400).json({ error: 'נא להזין תעודת זהות' });
   }
 
+  if (!/^\d{9}$/.test(id_number.trim())) {
+    return res.status(400).json({ error: 'מספר תעודת זהות לא תקין' });
+  }
+
+  // Check if this ID belongs to an admin — skip employee lookup entirely
+  // Unless as_employee is set (admin choosing to verify themselves as an employee)
+  const adminIds = (process.env.ADMIN_IDS || '').split(',').map((s) => s.trim());
+  if (adminIds.includes(id_number.trim()) && !req.body.as_employee) {
+    return res.json({ isAdmin: true });
+  }
+
   const { data: employee, error } = await supabase
     .from('employees')
-    .select('id, is_suspended, attempts_count')
+    .select('id, is_blocked, attempts_count')
     .eq('id_number', id_number.trim())
     .single();
 
@@ -27,13 +38,13 @@ router.post('/init', async (req, res) => {
       // "no rows returned" = employee not found
       return res.status(404).json({ error: 'תעודת הזהות לא נמצאה במערכת' });
     }
-    return res.status(500).json({ error: `שגיאת שרת: ${error.message}` });
+    return res.status(500).json({ error: 'שגיאת שרת' });
   }
   if (!employee) {
     return res.status(404).json({ error: 'תעודת הזהות לא נמצאה במערכת' });
   }
 
-  if (employee.is_suspended) {
+  if (employee.is_blocked) {
     return res.status(403).json({
       error: 'חשבונך חסום לצמיתות. אנא פנה למחלקת משאבי אנוש.',
       blocked: true,
@@ -88,7 +99,7 @@ router.post('/submit', async (req, res) => {
     return res.status(404).json({ error: 'עובד לא נמצא' });
   }
 
-  if (employee.is_suspended) {
+  if (employee.is_blocked) {
     return res.status(403).json({
       error: 'חשבונך חסום לצמיתות. אנא פנה למחלקת משאבי אנוש.',
       blocked: true,
@@ -98,19 +109,19 @@ router.post('/submit', async (req, res) => {
   // Compare base fields (case-insensitive trim)
   const normalize = (v) => (v ?? '').toString().trim().toLowerCase();
 
-  const baseMatch =
-    normalize(employee.name) === normalize(name) &&
-    normalize(employee.email) === normalize(email) &&
-    normalize(employee.phone) === normalize(phone);
+  const wrongFields = [];
+  if (normalize(employee.name) !== normalize(name)) wrongFields.push('שם מלא');
+  if (normalize(employee.email) !== normalize(email)) wrongFields.push('כתובת מייל');
+  if (normalize(employee.phone) !== normalize(phone)) wrongFields.push('טלפון נייד');
 
-  // Compare the 3 extra fields chosen for this session
-  const extraMatch = fieldKeys.every((key) => {
-    const submitted = normalize(extraFields[key]);
-    const stored = normalize(employee[key]);
-    return submitted === stored;
-  });
+  for (const key of fieldKeys) {
+    if (normalize(extraFields[key]) !== normalize(employee[key])) {
+      const field = EXTRA_FIELDS.find((f) => f.key === key);
+      wrongFields.push(field?.label || key);
+    }
+  }
 
-  if (baseMatch && extraMatch) {
+  if (wrongFields.length === 0) {
     // ✅ Success — reset attempts and record verification
     await supabase
       .from('employees')
@@ -133,7 +144,7 @@ router.post('/submit', async (req, res) => {
 
   await supabase
     .from('employees')
-    .update({ attempts_count: newAttempts, is_suspended: shouldBlock })
+    .update({ attempts_count: newAttempts, is_blocked: shouldBlock })
     .eq('id', employee.id);
 
   if (shouldBlock) {
@@ -145,6 +156,7 @@ router.post('/submit', async (req, res) => {
 
   return res.status(401).json({
     error: 'הפרטים שהוזנו שגויים.',
+    wrongFields,
     remainingAttempts: 2 - newAttempts,
   });
 });

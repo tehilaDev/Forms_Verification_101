@@ -60,7 +60,7 @@ const errorBox = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function VerificationForm() {
-  const [step, setStep] = useState(1); // 1 = enter ID, 2 = full form
+  const [step, setStep] = useState(1); // 1 = enter ID, 2 = full form, 'admin' = admin password
 
   // Step-1 state
   const [idNumber, setIdNumber] = useState('');
@@ -72,19 +72,30 @@ export default function VerificationForm() {
   const [formData, setFormData] = useState({ name: '', email: '', phone: '' });
   const [extraValues, setExtraValues] = useState({});
 
+  // Admin state
+  const [adminPassword, setAdminPassword] = useState('');
+
   // Global state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [wrongFields, setWrongFields] = useState([]);
   const [blocked, setBlocked] = useState(false);
   const [success, setSuccess] = useState(false);
 
   // ── Step 1: look up employee ───────────────────────────────────────────────
-  const handleInit = async (e) => {
-    e.preventDefault();
+  const handleInit = async (e, asEmployee = false) => {
+    if (e) e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      const { data } = await axios.post('/api/verify/init', { id_number: idNumber });
+      const { data } = await axios.post('/api/verify/init', {
+        id_number: idNumber,
+        ...(asEmployee && { as_employee: true }),
+      });
+      if (data.isAdmin) {
+        setStep('admin');
+        return;
+      }
       setToken(data.token);
       setFields(data.fields);
       setRemainingAttempts(data.remainingAttempts);
@@ -102,6 +113,7 @@ export default function VerificationForm() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setWrongFields([]);
     setLoading(true);
     try {
       await axios.post('/api/verify/submit', {
@@ -115,6 +127,37 @@ export default function VerificationForm() {
       if (res?.blocked || err.response?.status === 403) setBlocked(true);
       setRemainingAttempts(res?.remainingAttempts ?? remainingAttempts - 1);
       setError(res?.error || 'שגיאה בחיבור לשרת');
+      setWrongFields(res?.wrongFields || []);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Admin: download today's export ────────────────────────────────────────
+  const handleAdminDownload = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const response = await axios.post(
+        '/api/export/admin/daily',
+        { admin_id: idNumber, admin_password: adminPassword },
+        { responseType: 'blob' }
+      );
+      const today = new Date().toISOString().split('T')[0];
+      const url = URL.createObjectURL(new Blob([response.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `verifications_admin_${today}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (err.response?.data instanceof Blob) {
+        const text = await err.response.data.text();
+        try { setError(JSON.parse(text).error); } catch { setError('שגיאה בייצוא הנתונים'); }
+      } else {
+        setError(err.response?.data?.error || 'שגיאה בייצוא הנתונים');
+      }
     } finally {
       setLoading(false);
     }
@@ -166,6 +209,8 @@ export default function VerificationForm() {
       <p style={{ color: '#9ca3af', fontSize: '13px', marginTop: '4px', marginBottom: '20px' }}>
         {step === 1
           ? 'הזן את תעודת הזהות שלך כדי להמשיך'
+          : step === 'admin'
+          ? 'הזן סיסמת מנהל להורדת קובץ האימותים'
           : 'נא למלא את הפרטים הבאים לאימות זהותך'}
       </p>
 
@@ -173,6 +218,16 @@ export default function VerificationForm() {
       {error && (
         <div style={errorBox}>
           {error}
+          {wrongFields.length > 0 && (
+            <div style={{ marginTop: '6px' }}>
+              <span style={{ fontWeight: '700' }}>שדות שגויים:</span>
+              <ul style={{ margin: '4px 0 0 0', paddingRight: '18px' }}>
+                {wrongFields.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {step === 2 && !blocked && remainingAttempts > 0 && (
             <span style={{ display: 'block', marginTop: '4px', fontWeight: '600' }}>
               ניסיונות שנותרו: {remainingAttempts}
@@ -197,6 +252,39 @@ export default function VerificationForm() {
           />
           <button style={btn()} type="submit" disabled={loading}>
             {loading ? 'טוען…' : 'המשך'}
+          </button>
+        </form>
+      )}
+
+      {/* ── Admin step ── */}
+      {step === 'admin' && (
+        <form onSubmit={handleAdminDownload}>
+          <label style={label}>סיסמת מנהל</label>
+          <input
+            style={input}
+            type="password"
+            value={adminPassword}
+            onChange={(e) => setAdminPassword(e.target.value)}
+            placeholder="הזן סיסמה"
+            required
+          />
+          <button style={btn()} type="submit" disabled={loading}>
+            {loading ? 'מייצא…' : 'הורד קובץ אקסל'}
+          </button>
+          <button
+            type="button"
+            style={{ ...btn('#10b981'), marginTop: '8px' }}
+            disabled={loading}
+            onClick={() => { setError(''); setAdminPassword(''); handleInit(null, true); }}
+          >
+            עבור לטופס אימות עובד
+          </button>
+          <button
+            type="button"
+            style={{ ...btn('#9ca3af'), marginTop: '8px' }}
+            onClick={() => { setStep(1); setError(''); setAdminPassword(''); }}
+          >
+            חזרה
           </button>
         </form>
       )}
