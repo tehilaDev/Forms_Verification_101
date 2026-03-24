@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 
+const API = import.meta.env.VITE_API_URL ?? '';
+
 // ── Shared styles ─────────────────────────────────────────────────────────────
 const card = {
   background: '#fff',
@@ -88,7 +90,7 @@ export default function VerificationForm() {
     setError('');
     setLoading(true);
     try {
-      const { data } = await axios.post('/api/verify/init', {
+      const { data } = await axios.post(`${API}/api/verify/init`, {
         id_number: idNumber,
         ...(asEmployee && { as_employee: true }),
       });
@@ -116,7 +118,7 @@ export default function VerificationForm() {
     setWrongFields([]);
     setLoading(true);
     try {
-      await axios.post('/api/verify/submit', {
+      await axios.post(`${API}/api/verify/submit`, {
         token,
         ...formData,
         extraFields: extraValues,
@@ -140,7 +142,7 @@ export default function VerificationForm() {
     setLoading(true);
     try {
       const response = await axios.post(
-        '/api/export/admin/daily',
+        `${API}/api/export/admin/daily`,
         { admin_id: idNumber, admin_password: adminPassword },
         { responseType: 'blob' }
       );
