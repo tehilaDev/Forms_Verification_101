@@ -58,7 +58,7 @@ export const FIELD_DEFINITIONS = [
     key: 'marital_status',
     label: 'מה מצבך המשפחתי?',
     type: 'select',
-    options: ['רווק/ה', 'נשוי/נשואה', 'גרוש/ה', 'אלמן/ה', 'פרוד/ה'],
+    options: ['רווק/ה', 'נשוי/אה', 'גרוש/ה', 'אלמן/ה', 'פרוד/ה'],
     nullable: false,
   },
   {
