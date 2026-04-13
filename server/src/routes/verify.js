@@ -1,13 +1,52 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import supabase from '../supabase.js';
-import { EXTRA_FIELDS, pickRandomFields } from '../fieldConfig.js';
+import { pickRandomFields } from '../fieldConfig.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const TOKEN_EXPIRY = '30m'; // session token valid for 30 minutes
+const TOKEN_EXPIRY = '30m';
 
-// ── Step 1: look up employee, return 3 random fields + signed token ───────────
+// ── Normalize an ID number — strip leading zeros to match DB storage ──────────
+function normalizeIdNumber(raw) {
+  const trimmed = (raw ?? '').toString().trim();
+  return trimmed.replace(/^0+/, '') || trimmed;
+}
+
+// ── Normalize a submitted value for comparison ────────────────────────────────
+// Strips invisible Unicode chars (RTL marks, non-breaking spaces), trims, lower-cases.
+// For date fields: converts DD/MM/YYYY → YYYY-MM-DD to match DB storage format.
+function normalizeValue(v, isDate = false) {
+  const s = (v ?? '').toString().replace(/[\u00A0\u200F\u200E\u202A-\u202E]/g, '').trim();
+  if (isDate) {
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  }
+  return s.toLowerCase();
+}
+
+// Hebrew label lookup for error messages
+const FIELD_LABELS = {
+  birth_date:             'תאריך לידה',
+  aliya_date:             'תאריך עלייה',
+  street:                 'רחוב',
+  city:                   'עיר/ישוב',
+  postal_code:            'מיקוד',
+  phone:                  'טלפון',
+  mobile_phone:           'טלפון נייד',
+  marital_status:         'מצב משפחתי',
+  health_fund:            'קופת חולים',
+  spouse_id_number:       'ת.ז. בן/בת הזוג',
+  spouse_passport_number: 'דרכון בן/בת הזוג',
+  spouse_birth_date:      'תאריך לידה בן/בת הזוג',
+};
+
+// Fields that are stored as dates in the DB (YYYY-MM-DD)
+const DATE_KEYS = new Set([
+  'birth_date', 'aliya_date', 'spouse_birth_date',
+]);
+
+// ── Step 1: look up employee, return 3 random questions + signed token ─────────
 router.post('/init', async (req, res) => {
   const { id_number } = req.body;
 
@@ -15,27 +54,28 @@ router.post('/init', async (req, res) => {
     return res.status(400).json({ error: 'נא להזין תעודת זהות' });
   }
 
-  if (!/^\d{9}$/.test(id_number.trim())) {
+  if (!/^\d{7,9}$/.test(id_number.trim())) {
     return res.status(400).json({ error: 'מספר תעודת זהות לא תקין' });
   }
 
-  // Check if this ID belongs to an admin — skip employee lookup entirely
-  // Unless as_employee is set (admin choosing to verify themselves as an employee)
+  const normalizedId = normalizeIdNumber(id_number);
+
+  // Admin shortcut — skip employee lookup
   const adminIds = (process.env.ADMIN_IDS || '').split(',').map((s) => s.trim());
   if (adminIds.includes(id_number.trim()) && !req.body.as_employee) {
     return res.json({ isAdmin: true });
   }
 
+  // Fetch employee
   const { data: employee, error } = await supabase
     .from('employees')
-    .select('id, is_blocked, attempts_count')
-    .eq('id_number', id_number.trim())
+    .select('*')
+    .eq('id_number', normalizedId)
     .single();
 
   if (error) {
     console.error('[verify/init] Supabase error:', error);
     if (error.code === 'PGRST116') {
-      // "no rows returned" = employee not found
       return res.status(404).json({ error: 'תעודת הזהות לא נמצאה במערכת' });
     }
     return res.status(500).json({ error: 'שגיאת שרת' });
@@ -51,11 +91,17 @@ router.post('/init', async (req, res) => {
     });
   }
 
-  const chosenFields = pickRandomFields();
+  // Fetch this employee's children
+  const { data: children = [] } = await supabase
+    .from('children')
+    .select('*')
+    .eq('parent_id_number', employee.id_number);
+
+  // Build pool from fields that have data, then pick 3 at random
+  const chosenFields = pickRandomFields(employee, children);
   const fieldKeys = chosenFields.map((f) => f.key);
 
-  // Sign a short-lived token so the server knows which fields were shown
-  const token = jwt.sign({ id_number: id_number.trim(), fieldKeys }, JWT_SECRET, {
+  const token = jwt.sign({ id_number: normalizedId, fieldKeys }, JWT_SECRET, {
     expiresIn: TOKEN_EXPIRY,
   });
 
@@ -65,17 +111,17 @@ router.post('/init', async (req, res) => {
       key,
       label,
       type,
-      options,
+      ...(options ? { options } : {}),
     })),
     remainingAttempts: Math.max(0, 2 - employee.attempts_count),
   });
 });
 
-// ── Step 2: verify all submitted details ──────────────────────────────────────
+// ── Step 2: verify submitted answers ─────────────────────────────────────────
 router.post('/submit', async (req, res) => {
-  const { token, name, email, phone, extraFields } = req.body;
+  const { token, answers } = req.body;
 
-  if (!token || !name || !email || !phone || !extraFields) {
+  if (!token || !answers || typeof answers !== 'object') {
     return res.status(400).json({ error: 'נא למלא את כל השדות' });
   }
 
@@ -89,6 +135,7 @@ router.post('/submit', async (req, res) => {
 
   const { id_number, fieldKeys } = payload;
 
+  // Fetch employee
   const { data: employee, error } = await supabase
     .from('employees')
     .select('*')
@@ -106,39 +153,59 @@ router.post('/submit', async (req, res) => {
     });
   }
 
-  // Compare base fields (case-insensitive trim)
-  const normalize = (v) => (v ?? '').toString().trim().toLowerCase();
+  // Fetch children (needed to resolve child-question keys)
+  const { data: children = [] } = await supabase
+    .from('children')
+    .select('*')
+    .eq('parent_id_number', employee.id_number);
 
   const wrongFields = [];
-  if (normalize(employee.name) !== normalize(name)) wrongFields.push('שם מלא');
-  if (normalize(employee.email) !== normalize(email)) wrongFields.push('כתובת מייל');
-  if (normalize(employee.phone) !== normalize(phone)) wrongFields.push('טלפון נייד');
 
   for (const key of fieldKeys) {
-    if (normalize(extraFields[key]) !== normalize(employee[key])) {
-      const field = EXTRA_FIELDS.find((f) => f.key === key);
-      wrongFields.push(field?.label || key);
+    const submitted = answers[key];
+
+    if (key.startsWith('child_birth_date_')) {
+      const childId = key.replace('child_birth_date_', '');
+      const child = children.find((c) => c.id === childId);
+      if (!child) { wrongFields.push('תאריך לידה של ילד'); continue; }
+      if (normalizeValue(submitted, true) !== normalizeValue(child.child_birth_date, true)) {
+        wrongFields.push(`תאריך לידה של ${child.child_name}`);
+      }
+
+    } else if (key.startsWith('child_id_')) {
+      const childId = key.replace('child_id_', '');
+      const child = children.find((c) => c.id === childId);
+      if (!child) { wrongFields.push('מספר זהות של ילד'); continue; }
+      if (normalizeValue(submitted) !== normalizeValue(child.child_id_number)) {
+        wrongFields.push(`מספר זהות של ${child.child_name}`);
+      }
+
+    } else {
+      const isDate = DATE_KEYS.has(key);
+      if (normalizeValue(submitted, isDate) !== normalizeValue(employee[key], isDate)) {
+        wrongFields.push(FIELD_LABELS[key] || key);
+      }
     }
   }
 
   if (wrongFields.length === 0) {
-    // ✅ Success — reset attempts and record verification
+    // ✅ Success — reset attempts and log the verification
     await supabase
       .from('employees')
       .update({ attempts_count: 0 })
       .eq('id', employee.id);
 
     await supabase.from('verifications').insert({
-      employee_id: employee.id,
-      employee_name: employee.name,
+      employee_id:        employee.id,
+      employee_name:      `${employee.first_name} ${employee.last_name}`,
       employee_id_number: employee.id_number,
-      ip_address: req.ip,
+      ip_address:         req.ip,
     });
 
     return res.json({ success: true, message: 'האימות הצליח! תודה.' });
   }
 
-  // ❌ Wrong details — increment attempts
+  // ❌ Wrong answers — increment attempts
   const newAttempts = employee.attempts_count + 1;
   const shouldBlock = newAttempts >= 2;
 

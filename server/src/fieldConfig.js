@@ -1,47 +1,151 @@
 /**
- * EXTRA_FIELDS — all possible extra verification fields.
+ * fieldConfig.js
  *
- * To add a new field in the future:
- *   1. Add a column to the `employees` table in Supabase.
- *   2. Add an entry here with the same `key` as the column name.
+ * Defines all possible verification question types and builds a per-employee
+ * pool of only the questions that have real data for that employee.
  *
- * Each session randomly picks 3 of these to show the employee.
+ * Each session picks 3 random questions from that pool.
  */
-export const EXTRA_FIELDS = [
+
+// ── Static field definitions ──────────────────────────────────────────────────
+// nullable: true  → only ask if the employee's value is not null/empty
+// nullable: false → always included (every employee should have this field)
+
+export const FIELD_DEFINITIONS = [
+  {
+    key: 'birth_date',
+    label: 'מה תאריך הלידה שלך?',
+    type: 'date',
+    nullable: false,
+  },
+  {
+    key: 'aliya_date',
+    label: 'מה תאריך העלייה שלך?',
+    type: 'date',
+    nullable: true,
+  },
+  {
+    key: 'street',
+    label: 'מה שם הרחוב שלך?',
+    type: 'text',
+    nullable: false,
+  },
+  {
+    key: 'city',
+    label: 'באיזו עיר/ישוב אתה גר?',
+    type: 'text',
+    nullable: false,
+  },
+  {
+    key: 'postal_code',
+    label: 'מה המיקוד שלך?',
+    type: 'text',
+    nullable: false,
+  },
+  {
+    key: 'phone',
+    label: 'מה מספר הטלפון שלך?',
+    type: 'text',
+    nullable: false,
+  },
+  {
+    key: 'mobile_phone',
+    label: 'מה מספר הטלפון הנייד שלך?',
+    type: 'text',
+    nullable: false,
+  },
   {
     key: 'marital_status',
-    label: 'מצב משפחתי',
+    label: 'מה מצבך המשפחתי?',
     type: 'select',
-    options: ['רווק', 'רווקה', 'נשוי', 'נשואה', 'גרוש', 'גרושה', 'אלמן', 'אלמנה'],
+    options: ['רווק/ה', 'נשוי/נשואה', 'גרוש/ה', 'אלמן/ה', 'פרוד/ה'],
+    nullable: false,
   },
   {
-    key: 'building_number',
-    label: 'מספר בניין',
+    key: 'health_fund',
+    label: 'מה שם קופת החולים שלך?',
     type: 'text',
+    nullable: false,
   },
   {
-    key: 'oldest_son_id',
-    label: 'ת.ז. בן בכור',
+    key: 'spouse_id_number',
+    label: 'מה מספר זהות בן/בת הזוג?',
     type: 'text',
+    nullable: true,
   },
   {
-    key: 'department',
-    label: 'מחלקה',
+    key: 'spouse_passport_number',
+    label: 'מה מספר הדרכון של בן/בת הזוג?',
     type: 'text',
+    nullable: true,
   },
   {
-    key: 'birth_city',
-    label: 'עיר לידה',
-    type: 'text',
+    key: 'spouse_birth_date',
+    label: 'מה תאריך הלידה של בן/בת הזוג?',
+    type: 'date',
+    nullable: true,
   },
-  // ← Add more fields here as needed
 ];
 
+// ── Build a pool of answerable questions for one employee ─────────────────────
+
 /**
- * Returns 3 random (unique) fields from EXTRA_FIELDS.
- * Called fresh each session so the selection is unpredictable.
+ * Returns only the fields that have actual data for this employee,
+ * plus dynamic child-question entries.
+ *
+ * @param {object}   employee - full employee row from DB
+ * @param {object[]} children - child rows for this employee
+ * @returns {object[]} array of field descriptors ready to show
  */
-export function pickRandomFields() {
-  const shuffled = [...EXTRA_FIELDS].sort(() => Math.random() - 0.5);
+export function buildFieldPool(employee, children = []) {
+  const pool = [];
+
+  for (const field of FIELD_DEFINITIONS) {
+    const value = employee[field.key];
+    const hasValue = value !== null && value !== undefined && value !== '';
+
+    if (hasValue) {
+      // Strip the internal `nullable` flag before sending to the client
+      const { nullable: _n, ...rest } = field;
+      pool.push(rest);
+    }
+  }
+
+  // Add per-child questions for each child that has relevant data
+  for (const child of children) {
+    if (child.child_birth_date) {
+      pool.push({
+        key: `child_birth_date_${child.id}`,
+        label: `מה תאריך הלידה של ${child.child_name}?`,
+        type: 'date',
+      });
+    }
+    if (child.child_id_number) {
+      pool.push({
+        key: `child_id_${child.id}`,
+        label: `מה מספר זהות של ${child.child_name}?`,
+        type: 'text',
+      });
+    }
+  }
+
+
+  return pool;
+}
+
+// ── Pick up to 3 random questions ─────────────────────────────────────────────
+
+/**
+ * Builds the field pool for the given employee + children, shuffles it,
+ * and returns up to 3 questions.
+ * If fewer than 3 fields have data, returns however many are available.
+ *
+ * @param {object}   employee
+ * @param {object[]} children
+ * @returns {object[]}
+ */
+export function pickRandomFields(employee, children = []) {
+  const pool = buildFieldPool(employee, children);
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, 3);
 }

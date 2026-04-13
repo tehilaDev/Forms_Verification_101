@@ -34,7 +34,7 @@ export async function generateDailyExport(date = new Date()) {
 
   const { data, error } = await supabase
     .from('verifications')
-    .select('employee_name, employee_id_number, verified_at, ip_address')
+    .select('employee_id_number, verified_at, ip_address, employees(first_name, last_name)')
     .gte('verified_at', startUTC.toISOString())
     .lte('verified_at', endUTC.toISOString())
     .order('verified_at', { ascending: true });
@@ -42,18 +42,17 @@ export async function generateDailyExport(date = new Date()) {
   if (error) throw error;
 
   const rows = (data || []).map((v) => ({
-    'שם עובד': v.employee_name,
+    'שם פרטי': v.employees?.first_name || '',
+    'שם משפחה': v.employees?.last_name || '',
     'תעודת זהות': v.employee_id_number,
-    'שעת אימות': new Date(v.verified_at).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' }),
-    'כתובת IP': v.ip_address || '',
   }));
 
   const ws = xlsx.utils.json_to_sheet(rows, {
-    header: ['שם עובד', 'תעודת זהות', 'שעת אימות', 'כתובת IP'],
+    header: ['שם פרטי', 'שם משפחה', 'תעודת זהות'],
   });
 
   // Set column widths for readability
-  ws['!cols'] = [{ wch: 24 }, { wch: 14 }, { wch: 20 }, { wch: 16 }];
+  ws['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 14 }];
 
   const wb = xlsx.utils.book_new();
   xlsx.utils.book_append_sheet(wb, ws, 'אימותים');
@@ -80,7 +79,7 @@ router.get('/daily', async (req, res) => {
 });
 
 // POST /api/export/admin/daily  { admin_id, admin_password }
-// Protected endpoint: returns name, email, id_number of today's verified employees
+// Protected endpoint: returns name and id_number of today's verified employees
 router.post('/admin/daily', adminLimiter, async (req, res) => {
   const { admin_id, admin_password } = req.body;
 
@@ -107,39 +106,23 @@ router.post('/admin/daily', adminLimiter, async (req, res) => {
 
     const { data: verifications, error: vErr } = await supabase
       .from('verifications')
-      .select('employee_name, employee_id_number')
+      .select('employee_id_number, employees(first_name, last_name)')
       .gte('verified_at', startUTC.toISOString())
       .lte('verified_at', endUTC.toISOString())
-      .order('employee_name', { ascending: true });
+      .order('employee_id_number', { ascending: true });
 
     if (vErr) throw vErr;
 
-    const idNumbers = (verifications || []).map((v) => v.employee_id_number);
-    let emailMap = {};
-
-    if (idNumbers.length > 0) {
-      const { data: employees, error: eErr } = await supabase
-        .from('employees')
-        .select('id_number, email')
-        .in('id_number', idNumbers);
-
-      if (eErr) throw eErr;
-
-      for (const emp of employees || []) {
-        emailMap[emp.id_number] = emp.email;
-      }
-    }
-
     const rows = (verifications || []).map((v) => ({
-      'שם עובד': v.employee_name,
-      'אימייל': emailMap[v.employee_id_number] || '',
+      'שם פרטי': v.employees?.first_name || '',
+      'שם משפחה': v.employees?.last_name || '',
       'תעודת זהות': v.employee_id_number,
     }));
 
     const ws = xlsx.utils.json_to_sheet(rows, {
-      header: ['שם עובד', 'אימייל', 'תעודת זהות'],
+      header: ['שם פרטי', 'שם משפחה', 'תעודת זהות'],
     });
-    ws['!cols'] = [{ wch: 24 }, { wch: 30 }, { wch: 14 }];
+    ws['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 14 }];
 
     const wb = xlsx.utils.book_new();
     xlsx.utils.book_append_sheet(wb, ws, 'אימותים');

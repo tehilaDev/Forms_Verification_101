@@ -33,6 +33,7 @@ const input = {
   fontFamily: 'inherit',
   outline: 'none',
   transition: 'border-color 0.2s',
+  boxSizing: 'border-box',
 };
 
 const btn = (color = '#5c67f2') => ({
@@ -62,17 +63,16 @@ const errorBox = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function VerificationForm() {
-  const [step, setStep] = useState(1); // 1 = enter ID, 2 = full form, 'admin' = admin password
+  const [step, setStep] = useState(1); // 1 = enter ID, 2 = answer questions, 'admin' = admin
 
   // Step-1 state
   const [idNumber, setIdNumber] = useState('');
 
   // Step-2 state (populated after /init)
   const [token, setToken] = useState('');
-  const [fields, setFields] = useState([]); // 3 random extra fields
+  const [fields, setFields] = useState([]);       // up to 3 random question fields
   const [remainingAttempts, setRemainingAttempts] = useState(2);
-  const [formData, setFormData] = useState({ name: '', email: '', phone: '' });
-  const [extraValues, setExtraValues] = useState({});
+  const [answers, setAnswers] = useState({});     // { [fieldKey]: string }
 
   // Admin state
   const [adminPassword, setAdminPassword] = useState('');
@@ -111,18 +111,14 @@ export default function VerificationForm() {
     }
   };
 
-  // ── Step 2: submit verification ───────────────────────────────────────────
+  // ── Step 2: submit answers ────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setWrongFields([]);
     setLoading(true);
     try {
-      await axios.post(`${API}/api/verify/submit`, {
-        token,
-        ...formData,
-        extraFields: extraValues,
-      });
+      await axios.post(`${API}/api/verify/submit`, { token, answers });
       setSuccess(true);
     } catch (err) {
       const res = err.response?.data;
@@ -213,7 +209,7 @@ export default function VerificationForm() {
           ? 'הזן את תעודת הזהות שלך כדי להמשיך'
           : step === 'admin'
           ? 'הזן סיסמת מנהל להורדת קובץ האימותים'
-          : 'נא למלא את הפרטים הבאים לאימות זהותך'}
+          : 'נא לענות על השאלות הבאות לאימות זהותך'}
       </p>
 
       {/* Error banner */}
@@ -250,6 +246,7 @@ export default function VerificationForm() {
             onChange={(e) => setIdNumber(e.target.value)}
             placeholder="הזן תעודת זהות"
             maxLength={9}
+            minLength={7}
             required
           />
           <button style={btn()} type="submit" disabled={loading}>
@@ -291,51 +288,19 @@ export default function VerificationForm() {
         </form>
       )}
 
-      {/* ── Step 2 ── */}
+      {/* ── Step 2: 3 random verification questions ── */}
       {step === 2 && (
         <form onSubmit={handleSubmit}>
-          {/* Base fields */}
-          <label style={label}>שם מלא</label>
-          <input
-            style={input}
-            type="text"
-            value={formData.name}
-            onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))}
-            placeholder="שם פרטי ושם משפחה"
-            required
-          />
-
-          <label style={label}>כתובת מייל</label>
-          <input
-            style={input}
-            type="email"
-            value={formData.email}
-            onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))}
-            placeholder="example@company.com"
-            required
-          />
-
-          <label style={label}>טלפון נייד</label>
-          <input
-            style={input}
-            type="tel"
-            inputMode="numeric"
-            value={formData.phone}
-            onChange={(e) => setFormData((p) => ({ ...p, phone: e.target.value }))}
-            placeholder="05X-XXXXXXX"
-            required
-          />
-
-          {/* 3 random extra fields */}
           {fields.map((field) => (
             <div key={field.key}>
               <label style={label}>{field.label}</label>
+
               {field.type === 'select' ? (
                 <select
                   style={input}
-                  value={extraValues[field.key] || ''}
+                  value={answers[field.key] || ''}
                   onChange={(e) =>
-                    setExtraValues((p) => ({ ...p, [field.key]: e.target.value }))
+                    setAnswers((prev) => ({ ...prev, [field.key]: e.target.value }))
                   }
                   required
                 >
@@ -346,13 +311,32 @@ export default function VerificationForm() {
                     </option>
                   ))}
                 </select>
+
+              ) : field.type === 'date' ? (
+                <>
+                  <input
+                    style={input}
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="DD/MM/YYYY"
+                    value={answers[field.key] || ''}
+                    onChange={(e) =>
+                      setAnswers((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
+                    required
+                  />
+                  <span style={{ fontSize: '12px', color: '#9ca3af', marginTop: '3px', display: 'block' }}>
+                    פורמט: יום/חודש/שנה (לדוגמה: 15/03/1985)
+                  </span>
+                </>
+
               ) : (
                 <input
                   style={input}
                   type="text"
-                  value={extraValues[field.key] || ''}
+                  value={answers[field.key] || ''}
                   onChange={(e) =>
-                    setExtraValues((p) => ({ ...p, [field.key]: e.target.value }))
+                    setAnswers((prev) => ({ ...prev, [field.key]: e.target.value }))
                   }
                   required
                 />
@@ -372,8 +356,7 @@ export default function VerificationForm() {
               setError('');
               setToken('');
               setFields([]);
-              setExtraValues({});
-              setFormData({ name: '', email: '', phone: '' });
+              setAnswers({});
             }}
           >
             חזרה
