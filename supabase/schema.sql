@@ -48,6 +48,7 @@ create table employees (
   -- Verification state
   attempts_count         integer not null default 0,
   is_blocked             boolean not null default false,
+  is_verified            boolean not null default false,
 
   created_at             timestamptz not null default now(),
   updated_at             timestamptz not null default now()

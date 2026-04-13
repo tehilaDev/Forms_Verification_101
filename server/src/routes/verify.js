@@ -91,6 +91,13 @@ router.post('/init', async (req, res) => {
     });
   }
 
+  if (employee.is_verified) {
+    return res.status(403).json({
+      error: 'האימות עבור תעודת זהות זו כבר בוצע. לא ניתן לבצע אימות נוסף.',
+      already_verified: true,
+    });
+  }
+
   // Fetch this employee's children
   const { data: children = [] } = await supabase
     .from('children')
@@ -189,10 +196,10 @@ router.post('/submit', async (req, res) => {
   }
 
   if (wrongFields.length === 0) {
-    // ✅ Success — reset attempts and log the verification
+    // ✅ Success — reset attempts, mark as verified, and log the verification
     await supabase
       .from('employees')
-      .update({ attempts_count: 0 })
+      .update({ attempts_count: 0, is_verified: true })
       .eq('id', employee.id);
 
     await supabase.from('verifications').insert({

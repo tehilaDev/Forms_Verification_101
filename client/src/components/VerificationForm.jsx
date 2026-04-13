@@ -82,6 +82,7 @@ export default function VerificationForm() {
   const [error, setError] = useState('');
   const [wrongFields, setWrongFields] = useState([]);
   const [blocked, setBlocked] = useState(false);
+  const [alreadyVerified, setAlreadyVerified] = useState(false);
   const [success, setSuccess] = useState(false);
 
   // ── Step 1: look up employee ───────────────────────────────────────────────
@@ -105,6 +106,7 @@ export default function VerificationForm() {
     } catch (err) {
       const serverError = err.response?.data?.error || 'שגיאה בחיבור לשרת';
       if (err.response?.data?.blocked) setBlocked(true);
+      if (err.response?.data?.already_verified) setAlreadyVerified(true);
       setError(serverError);
     } finally {
       setLoading(false);
@@ -160,6 +162,25 @@ export default function VerificationForm() {
       setLoading(false);
     }
   };
+
+  // ── Already verified screen ───────────────────────────────────────────────
+  if (alreadyVerified) {
+    return (
+      <div style={card}>
+        <div style={{ textAlign: 'center', padding: '12px 0' }}>
+          <div style={{ fontSize: '52px', marginBottom: '14px' }}>✅</div>
+          <h2 style={{ color: '#2563eb', fontSize: '22px', marginBottom: '10px' }}>
+            האימות כבר בוצע
+          </h2>
+          <p style={{ color: '#6b7280', lineHeight: '1.7', fontSize: '15px' }}>
+            האימות עבור תעודת זהות זו כבר בוצע בעבר.
+            <br />
+            לא ניתן לבצע אימות נוסף.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // ── Blocked screen ────────────────────────────────────────────────────────
   if (blocked) {
