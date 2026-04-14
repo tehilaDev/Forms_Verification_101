@@ -146,6 +146,20 @@ export function buildFieldPool(employee, children = []) {
  */
 export function pickRandomFields(employee, children = []) {
   const pool = buildFieldPool(employee, children);
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, 3);
+
+  // Deduplicate by key (safety guard)
+  const seen = new Set();
+  const unique = pool.filter((f) => {
+    if (seen.has(f.key)) return false;
+    seen.add(f.key);
+    return true;
+  });
+
+  // Fisher-Yates shuffle — unbiased
+  for (let i = unique.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [unique[i], unique[j]] = [unique[j], unique[i]];
+  }
+
+  return unique.slice(0, 3);
 }

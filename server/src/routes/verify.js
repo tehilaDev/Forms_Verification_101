@@ -19,7 +19,7 @@ function normalizeIdNumber(raw) {
 function normalizeValue(v, isDate = false) {
   const s = (v ?? '').toString().replace(/[\u00A0\u200F\u200E\u202A-\u202E]/g, '').trim();
   if (isDate) {
-    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    const m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
     if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   }
   return s.toLowerCase();
@@ -45,6 +45,21 @@ const FIELD_LABELS = {
 const DATE_KEYS = new Set([
   'birth_date', 'aliya_date', 'spouse_birth_date',
 ]);
+
+// Phone fields — dashes and spaces are stripped before comparison
+const PHONE_KEYS = new Set(['phone', 'mobile_phone']);
+
+function normalizePhone(v) {
+  return normalizeValue(v).replace(/[-\s]/g, '');
+}
+
+// Street field — strip digits and punctuation, keep only letters and spaces
+function normalizeStreet(v) {
+  return normalizeValue(v)
+    .replace(/[^א-תa-z\s]/g, '')  // keep Hebrew letters, Latin letters, spaces
+    .replace(/\s+/g, ' ')          // collapse multiple spaces
+    .trim();
+}
 
 // ── Step 1: look up employee, return 3 random questions + signed token ─────────
 router.post('/init', async (req, res) => {
@@ -189,7 +204,10 @@ router.post('/submit', async (req, res) => {
 
     } else {
       const isDate = DATE_KEYS.has(key);
-      if (normalizeValue(submitted, isDate) !== normalizeValue(employee[key], isDate)) {
+      const norm = PHONE_KEYS.has(key) ? normalizePhone
+                 : key === 'street'    ? normalizeStreet
+                 : (val) => normalizeValue(val, isDate);
+      if (norm(submitted) !== norm(employee[key])) {
         wrongFields.push(FIELD_LABELS[key] || key);
       }
     }
