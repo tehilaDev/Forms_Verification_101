@@ -84,7 +84,7 @@ router.post('/init', async (req, res) => {
   // Fetch employee
   const { data: employee, error } = await supabase
     .from('employees')
-    .select('*')
+    .select('id, id_number, is_blocked, is_verified, attempts_count, birth_date, aliya_date, street, city, postal_code, phone, mobile_phone, marital_status, health_fund, spouse_id_number, spouse_passport_number, spouse_birth_date')
     .eq('id_number', normalizedId)
     .single();
 
@@ -116,8 +116,8 @@ router.post('/init', async (req, res) => {
   // Fetch this employee's children
   const { data: children = [] } = await supabase
     .from('children')
-    .select('*')
-    .eq('parent_id_number', employee.id_number);
+    .select('id, child_name, child_id_number, child_birth_date')
+    .eq('employee_id', employee.id);
 
   // Build pool from fields that have data, then pick 3 at random
   const chosenFields = pickRandomFields(employee, children);

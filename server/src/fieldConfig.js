@@ -111,8 +111,17 @@ export function buildFieldPool(employee, children = []) {
     }
   }
 
+  // Deduplicate children: prefer child_id_number as key, fall back to child_name
+  const seenChildren = new Set();
+  const uniqueChildren = children.filter((c) => {
+    const key = c.child_id_number?.trim() || c.child_name?.trim().toLowerCase();
+    if (!key || seenChildren.has(key)) return false;
+    seenChildren.add(key);
+    return true;
+  });
+
   // Add per-child questions for each child that has relevant data
-  for (const child of children) {
+  for (const child of uniqueChildren) {
     if (child.child_birth_date) {
       pool.push({
         key: `child_birth_date_${child.id}`,

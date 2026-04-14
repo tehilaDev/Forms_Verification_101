@@ -61,6 +61,16 @@ const errorBox = {
   marginBottom: '4px',
 };
 
+const spinnerStyle = {
+  display: 'inline-block',
+  width: '14px',
+  height: '14px',
+  border: '2px solid rgba(255,255,255,0.4)',
+  borderTopColor: '#fff',
+  borderRadius: '50%',
+  animation: 'spin 0.7s linear infinite',
+};
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function VerificationForm() {
   const [step, setStep] = useState(1); // 1 = enter ID, 2 = answer questions, 'admin' = admin
@@ -221,6 +231,7 @@ export default function VerificationForm() {
   // ── Main form ─────────────────────────────────────────────────────────────
   return (
     <div style={card}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       {/* Header */}
       <h1 style={{ fontSize: '21px', fontWeight: '800', color: '#1f2937' }}>
         אימות עובד – טופס 101
@@ -271,7 +282,12 @@ export default function VerificationForm() {
             required
           />
           <button style={btn()} type="submit" disabled={loading}>
-            {loading ? 'טוען…' : 'המשך'}
+            {loading ? (
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <span style={spinnerStyle} />
+                מחפש פרטים…
+              </span>
+            ) : 'המשך'}
           </button>
         </form>
       )}
